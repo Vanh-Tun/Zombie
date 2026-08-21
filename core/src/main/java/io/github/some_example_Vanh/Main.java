@@ -11,6 +11,8 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ScreenUtils;
+import com.badlogic.gdx.audio.Music;
+import com.badlogic.gdx.audio.Sound;
 
 import java.util.Iterator;
 
@@ -20,7 +22,7 @@ public class Main extends ApplicationAdapter {
     private BitmapFont font;
 
     // =========================
-    // HÌNH ẢNH
+    // HÌNH ẢNH & ÂM THANH
     // =========================
 
     private Texture background;
@@ -30,6 +32,9 @@ public class Main extends ApplicationAdapter {
     private Texture zombieBay;
     private Texture vienDan;
     private Texture heartIcon;
+    private Music backgroundMusic;
+    private Sound gameOverSound;
+    private boolean gameOverSoundPlayed = false;
 
     // =========================
     // TOM
@@ -42,7 +47,7 @@ public class Main extends ApplicationAdapter {
     private final float TOM_HEIGHT = 130;
 
     // =========================
-    // GAME
+    // GAME STATE
     // =========================
 
     private Array<Zombie> zombies;
@@ -50,6 +55,9 @@ public class Main extends ApplicationAdapter {
 
     private int score = 0;
     private int lives = 3;
+
+    // Thêm biến quản lý trạng thái bắt đầu
+    private boolean gameStarted = false;
     private boolean gameOver = false;
 
     private float spawnTimer = 0;
@@ -73,14 +81,21 @@ public class Main extends ApplicationAdapter {
         background = new Texture("background.png");
 
         tom = new Texture("tom.png");
+        backgroundMusic = Gdx.audio.newMusic(
+            Gdx.files.internal("nhacnen.mp3")
+        );
 
-        // Zombie và đạn dùng hàm lọc nền trắng thuần (không làm lủng xô)
+        backgroundMusic.setLooping(true);
+        backgroundMusic.setVolume(0.5f);
+        backgroundMusic.play();
+
+        // Zombie và đạn dùng hàm lọc nền trắng thuần
         zombieThuong = loadImageWithoutWhite("zombiethuong.png");
         zombieDoiXo = loadImageWithoutWhite("zombiedoixo.png");
         zombieBay = loadImageWithoutWhite("zombiebay.png");
         vienDan = loadImageWithoutWhite("viendan.png");
 
-        // Trái tim dùng hàm lọc riêng biệt (xóa sạch ô xám caro)
+        // Trái tim dùng hàm lọc riêng biệt
         heartIcon = loadHeartWithoutBackground("traitim.png");
 
         tomX = Gdx.graphics.getWidth() / 2f - TOM_WIDTH / 2f;
@@ -88,12 +103,11 @@ public class Main extends ApplicationAdapter {
 
         zombies = new Array<>();
         bullets = new Array<>();
+        gameOverSound = Gdx.audio.newSound(
+            Gdx.files.internal("gameover.ogg")
+        );
     }
 
-
-    // =========================================================
-    // HÀM LỌC NỀN DÀNH RIÊNG CHO ZOMBIE (CHỈ XÓA TRẮNG THUẦN)
-    // =========================================================
 
     private Texture loadImageWithoutWhite(String fileName) {
 
@@ -134,10 +148,6 @@ public class Main extends ApplicationAdapter {
     }
 
 
-    // =========================================================
-    // HÀM LỌC NỀN DÀNH RIÊNG CHO TRÁI TIM (XÓA CẢ Ô CARO XÁM/TRẮNG)
-    // =========================================================
-
     private Texture loadHeartWithoutBackground(String fileName) {
 
         Pixmap original = new Pixmap(
@@ -163,7 +173,6 @@ public class Main extends ApplicationAdapter {
                 boolean isWhite = (r > 230 && g > 230 && b > 230);
                 boolean isGrayChecker = (Math.abs(r - g) < 12 && Math.abs(g - b) < 12 && r > 170 && r < 230);
 
-                // Xóa nếu là màu trắng hoặc màu xám caro giả trong suốt
                 if (isWhite || isGrayChecker) {
                     result.drawPixel(x, y, 0);
                 } else {
@@ -188,8 +197,14 @@ public class Main extends ApplicationAdapter {
 
         ScreenUtils.clear(0, 0, 0, 1);
 
-        if (!gameOver) {
-
+        // 1. XỬ LÝ LOGIC THEO TRẠNG THÁI GAME
+        if (!gameStarted) {
+            // Màn hình chờ: Chờ người chơi nhấn SPACE hoặc chạm để bắt đầu
+            if (Gdx.input.isKeyJustPressed(Input.Keys.SPACE) || Gdx.input.isTouched()) {
+                gameStarted = true;
+            }
+        } else if (!gameOver) {
+            // Đang chơi game
             handleInput(delta);
 
             spawnTimer += delta;
@@ -204,13 +219,16 @@ public class Main extends ApplicationAdapter {
             checkCollision();
 
         } else {
+            // Màn hình Game Over: Nhấn SPACE hoặc chạm để chơi lại
             if (Gdx.input.isKeyJustPressed(Input.Keys.SPACE) || Gdx.input.isTouched()) {
                 restartGame();
             }
         }
 
+        // 2. VẼ MÀN HÌNH
         batch.begin();
 
+        // Vẽ nền
         batch.draw(
             background,
             0,
@@ -219,80 +237,107 @@ public class Main extends ApplicationAdapter {
             Gdx.graphics.getHeight()
         );
 
-        batch.draw(
-            tom,
-            tomX,
-            tomY,
-            TOM_WIDTH,
-            TOM_HEIGHT
-        );
-
-        for (Zombie zombie : zombies) {
-
-            batch.draw(
-                zombie.texture,
-                zombie.x,
-                zombie.y,
-                zombie.width,
-                zombie.height
-            );
-        }
-
-        for (Bullet bullet : bullets) {
-
-            batch.draw(
-                vienDan,
-                bullet.x,
-                bullet.y,
-                bullet.width,
-                bullet.height
-            );
-        }
-
-        font.draw(
-            batch,
-            "DIEM: " + score,
-            20,
-            Gdx.graphics.getHeight() - 20
-        );
-
-        // Vẽ biểu tượng trái tim
-        float heartSize = 35f;
-        float heartSpacing = 10f;
-        float startX = 20f;
-        float startY = Gdx.graphics.getHeight() - 90;
-
-        for (int i = 0; i < lives; i++) {
-            batch.draw(
-                heartIcon,
-                startX + i * (heartSize + heartSpacing),
-                startY,
-                heartSize,
-                heartSize
-            );
-        }
-
-        if (gameOver) {
-
+        if (!gameStarted) {
+            // =========================
+            // HIỂN THỊ MÀN HÌNH START
+            // =========================
             font.getData().setScale(3);
-
             font.draw(
                 batch,
-                "GAME OVER",
-                Gdx.graphics.getWidth() / 2f - 140,
-                Gdx.graphics.getHeight() / 2f + 40
+                "TOM VS ZOMBIE",
+                Gdx.graphics.getWidth() / 2f - 210,
+                Gdx.graphics.getHeight() / 2f + 60
             );
 
             font.getData().setScale(1.5f);
-
             font.draw(
                 batch,
-                "Nhan SPACE hoac cham man hinh de choi lai",
-                Gdx.graphics.getWidth() / 2f - 210,
+                "Nhan SPACE hoac cham man hinh de bat dau",
+                Gdx.graphics.getWidth() / 2f - 240,
                 Gdx.graphics.getHeight() / 2f - 20
             );
 
             font.getData().setScale(2);
+
+        } else {
+            // =========================
+            // HIỂN THỊ MÀN HÌNH CHƠI GAME
+            // =========================
+            batch.draw(
+                tom,
+                tomX,
+                tomY,
+                TOM_WIDTH,
+                TOM_HEIGHT
+            );
+
+            for (Zombie zombie : zombies) {
+                batch.draw(
+                    zombie.texture,
+                    zombie.x,
+                    zombie.y,
+                    zombie.width,
+                    zombie.height
+                );
+            }
+
+            for (Bullet bullet : bullets) {
+                batch.draw(
+                    vienDan,
+                    bullet.x,
+                    bullet.y,
+                    bullet.width,
+                    bullet.height
+                );
+            }
+
+            // Vẽ điểm số
+            font.draw(
+                batch,
+                "DIEM: " + score,
+                20,
+                Gdx.graphics.getHeight() - 20
+            );
+
+            // Vẽ biểu tượng trái tim
+            float heartSize = 35f;
+            float heartSpacing = 10f;
+            float startX = 20f;
+            float startY = Gdx.graphics.getHeight() - 90;
+
+            for (int i = 0; i < lives; i++) {
+                batch.draw(
+                    heartIcon,
+                    startX + i * (heartSize + heartSpacing),
+                    startY,
+                    heartSize,
+                    heartSize
+                );
+            }
+
+            // Hiển thị Game Over nếu thua
+            if (gameOver) {
+
+                font.getData().setScale(3);
+
+                font.draw(
+                    batch,
+                    "GAME OVER",
+                    Gdx.graphics.getWidth() / 2f - 140,
+                    Gdx.graphics.getHeight() / 2f + 40
+                );
+
+                font.getData().setScale(1.5f);
+
+                font.draw(
+                    batch,
+                    "Nhan SPACE hoac cham man hinh de choi lai",
+                    Gdx.graphics.getWidth() / 2f - 210,
+                    Gdx.graphics.getHeight() / 2f - 20
+                );
+
+                font.getData().setScale(2);
+            }
         }
 
         batch.end();
@@ -303,10 +348,18 @@ public class Main extends ApplicationAdapter {
         score = 0;
         lives = 3;
         gameOver = false;
+        gameOverSoundPlayed = false;
+
         zombies.clear();
         bullets.clear();
         spawnTimer = 0;
+
         tomX = Gdx.graphics.getWidth() / 2f - TOM_WIDTH / 2f;
+
+        if (backgroundMusic != null) {
+            backgroundMusic.stop();
+            backgroundMusic.play();
+        }
     }
 
 
@@ -414,6 +467,15 @@ public class Main extends ApplicationAdapter {
                 if (lives <= 0) {
                     lives = 0;
                     gameOver = true;
+
+                    if (backgroundMusic.isPlaying()) {
+                        backgroundMusic.stop();
+                    }
+
+                    if (!gameOverSoundPlayed) {
+                        gameOverSound.play(1.0f);
+                        gameOverSoundPlayed = true;
+                    }
                 }
 
                 continue;
@@ -502,5 +564,7 @@ public class Main extends ApplicationAdapter {
         zombieBay.dispose();
         vienDan.dispose();
         heartIcon.dispose();
+        backgroundMusic.dispose();
+        gameOverSound.dispose();
     }
 }
